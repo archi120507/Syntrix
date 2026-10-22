@@ -425,7 +425,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'analyzer' | 'dashboard' | 'guide' | 'architecture'>('analyzer');
 
   const [inputText, setInputText] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>(import.meta.env.VITE_GEMINI_API_KEY?.trim() ?? '');
   const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
