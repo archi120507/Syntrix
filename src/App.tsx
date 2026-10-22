@@ -425,6 +425,10 @@ export default function App() {
   const [isTestingRunning, setIsTestingRunning] = useState<boolean>(false);
   const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [testFilter, setTestFilter] = useState<'ALL' | 'CORRECT' | 'MISSED' | 'FALSE_ALARM' | 'RISK_MISMATCH'>('ALL');
+  const [customTestCases, setCustomTestCases] = useState<TestCase[]>([]);
+  const [customTestMessage, setCustomTestMessage] = useState<string>('');
+  const [customExpectedRisk, setCustomExpectedRisk] = useState<RiskLevel>('MEDIUM');
+  const [customTestError, setCustomTestError] = useState<string | null>(null);
 
   const wordCount = useMemo(() => {
     return inputText.trim() ? inputText.trim().split(/\s+/).length : 0;
@@ -455,8 +459,8 @@ export default function App() {
     }
   };
 
-  const handleAnalyze = async () => {
-    if (!inputText.trim()) {
+  const handleAnalyze = async (textToAnalyze = inputText) => {
+    if (!textToAnalyze.trim()) {
       setAnalysisError('Please paste or type a suspicious message, chat text, or call transcript to analyze.');
       return;
     }
@@ -469,11 +473,11 @@ export default function App() {
     try {
       if (apiKey.trim()) {
         try {
-          const aiResult = await analyzeTextGemini(inputText, apiKey.trim());
+          const aiResult = await analyzeTextGemini(textToAnalyze, apiKey.trim());
           setAnalysisResult(aiResult);
         } catch (apiErr: any) {
           console.warn('Gemini API call failed, falling back to offline rule engine:', apiErr);
-          const fallbackResult = analyzeTextRuleBased(inputText);
+          const fallbackResult = analyzeTextRuleBased(textToAnalyze);
           setAnalysisResult({
             ...fallbackResult,
             summary: `(Offline Rule Engine): ${fallbackResult.summary}`
@@ -481,7 +485,7 @@ export default function App() {
         }
       } else {
         await new Promise(resolve => setTimeout(resolve, 500));
-        const ruleResult = analyzeTextRuleBased(inputText);
+        const ruleResult = analyzeTextRuleBased(textToAnalyze);
         setAnalysisResult(ruleResult);
       }
     } catch (err: any) {
@@ -496,36 +500,57 @@ export default function App() {
     setTestResults([]);
 
     const results: TestResult[] = [];
+    const testCases = [...EXTENDED_TEST_SUITE, ...customTestCases];
 
-    for (const testCase of EXTENDED_TEST_SUITE) {
-      const startTime = performance.now();
-      let res: AnalysisResult;
+    try {
+      for (const testCase of testCases) {
+        const startTime = performance.now();
+        const res = analyzeTextRuleBased(testCase.text);
+        const endTime = performance.now();
 
-      if (apiKey.trim()) {
-        try {
-          res = await analyzeTextGemini(testCase.text, apiKey.trim());
-        } catch {
-          res = analyzeTextRuleBased(testCase.text);
-        }
-      } else {
-        res = analyzeTextRuleBased(testCase.text);
+        results.push({
+          testCase,
+          actualRisk: res.riskLevel,
+          score: res.score,
+          isCorrect: res.riskLevel === testCase.expectedRisk,
+          executionTimeMs: Math.round(endTime - startTime)
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
+      setTestResults(results);
+    } finally {
+      setIsTestingRunning(false);
+    }
+  };
 
-      const endTime = performance.now();
-
-      const isCorrect = res.riskLevel === testCase.expectedRisk;
-
-      results.push({
-        testCase,
-        actualRisk: res.riskLevel,
-        score: res.score,
-        isCorrect,
-        executionTimeMs: Math.round(endTime - startTime)
-      });
+  const handleAddCustomTestCase = () => {
+    const text = customTestMessage.trim();
+    if (!text) {
+      setCustomTestError('Enter a message before adding it to the evaluation suite.');
+      return;
     }
 
-    setTestResults(results);
-    setIsTestingRunning(false);
+    setCustomTestCases(current => [
+      ...current,
+      {
+        id: `custom-${crypto.randomUUID()}`,
+        title: `Custom Message ${current.length + 1}`,
+        categoryLabel: customExpectedRisk === 'LOW' ? 'Legitimate Notice' : `${customExpectedRisk} Risk Test`,
+        expectedRisk: customExpectedRisk,
+        text,
+        description: 'User-provided evaluation vector.',
+        isScam: customExpectedRisk !== 'LOW'
+      }
+    ]);
+    setCustomTestMessage('');
+    setCustomTestError(null);
+    setTestResults([]);
+  };
+
+  const handleRemoveCustomTestCase = (id: string) => {
+    setCustomTestCases(current => current.filter(testCase => testCase.id !== id));
+    setTestResults([]);
   };
 
   const dashboardMetrics = useMemo(() => {
@@ -843,7 +868,7 @@ export default function App() {
                   </div>
 
                   <button
-                    onClick={handleAnalyze}
+                    onClick={() => handleAnalyze()}
                     disabled={isAnalyzing || !inputText.trim()}
                     className={`px-6 py-2.5 rounded-xl text-sm font-semibold flex items-center space-x-2 shadow-lg transition-all ${
                       isAnalyzing || !inputText.trim()
@@ -1122,10 +1147,78 @@ export default function App() {
                 ) : (
                   <>
                     <Play className="w-4 h-4 fill-current" />
-                    <span>Run Full Test Suite ({EXTENDED_TEST_SUITE.length} Vectors)</span>
+                    <span>Run Full Test Suite ({EXTENDED_TEST_SUITE.length + customTestCases.length} Vectors)</span>
                   </>
                 )}
               </button>
+            </div>
+
+            <div className="bg-[#1E293B] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">Evaluate Your Own Message</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Add a message with its expected risk level. Your custom cases are included in the next run and metrics.
+                </p>
+              </div>
+              <label htmlFor="custom-evaluation-message" className="sr-only">Message to evaluate</label>
+              <textarea
+                id="custom-evaluation-message"
+                value={customTestMessage}
+                onChange={event => {
+                  setCustomTestMessage(event.target.value);
+                  setCustomTestError(null);
+                }}
+                placeholder="Paste the message you want to test..."
+                rows={3}
+                className="w-full bg-[#0F172A] border border-slate-700 rounded-xl p-3 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 resize-y"
+              />
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <label htmlFor="custom-expected-risk" className="text-xs text-slate-400">Expected risk level</label>
+                <select
+                  id="custom-expected-risk"
+                  value={customExpectedRisk}
+                  onChange={event => {
+                    const risk = event.target.value;
+                    if (risk === 'LOW' || risk === 'MEDIUM' || risk === 'HIGH') {
+                      setCustomExpectedRisk(risk);
+                    }
+                  }}
+                  className="bg-[#0F172A] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="LOW">LOW — legitimate</option>
+                  <option value="MEDIUM">MEDIUM — caution</option>
+                  <option value="HIGH">HIGH — likely scam</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddCustomTestCase}
+                  disabled={isTestingRunning}
+                  className="sm:ml-auto px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-semibold text-xs rounded-lg transition-all"
+                >
+                  Add to Evaluation Suite
+                </button>
+              </div>
+              {customTestError && (
+                <p role="alert" className="text-xs text-red-400">{customTestError}</p>
+              )}
+              {customTestCases.length > 0 && (
+                <ul className="space-y-2 border-t border-slate-800 pt-3">
+                  {customTestCases.map(testCase => (
+                    <li key={testCase.id} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-slate-300">{testCase.title} <span className="text-slate-500">— expected {testCase.expectedRisk}</span></span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomTestCase(testCase.id)}
+                        disabled={isTestingRunning}
+                        className="text-slate-400 hover:text-red-400 disabled:opacity-50"
+                        aria-label={`Remove ${testCase.title}`}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             {/* Metrics Cards & Confusion Matrix */}
@@ -1300,7 +1393,12 @@ export default function App() {
                               <button
                                 onClick={() => {
                                   setInputText(r.testCase.text);
+                                  setSelectedPresetId('');
+                                  setAnalysisResult(null);
+                                  setAnalysisError(null);
+                                  setActivePhrase(null);
                                   setActiveTab('analyzer');
+                                  void handleAnalyze(r.testCase.text);
                                 }}
                                 className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] rounded-lg border border-slate-700 transition-all"
                               >
