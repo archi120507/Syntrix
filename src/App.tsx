@@ -164,6 +164,15 @@ const EXTENDED_TEST_SUITE: TestCase[] = [
     isScam: false,
     description: 'Standard Indian Railways booking confirmation SMS.',
     text: 'PNR: 2419823011, TRAIN: 12951, DOB: 24-OCT, CLASS: 3A, NDLS to ADI. Pass: 1. Charting Status: CHART PREPARED. Ticket status: CNF B2-34. Enjoy your journey with Indian Railways. Download official IRCTC Rail Connect app for live status.'
+  },
+  {
+    id: 'urgent-otp-theft',
+    title: 'Urgent OTP Credential Theft',
+    categoryLabel: 'High Risk Scam',
+    expectedRisk: 'HIGH',
+    isScam: true,
+    description: 'Creates urgency to trick the recipient into sharing a one-time password.',
+    text: 'URGENT: Your bank account is blocked. Share your OTP now to restore access.'
   }
 ];
 
@@ -268,6 +277,9 @@ function analyzeTextRuleBased(text: string): AnalysisResult {
   if (categories.sensitiveDataRequests) score += 15;
   if (categories.impersonation && categories.extremeUrgency && categories.financialRequests) {
     score += 10;
+  }
+  if (categories.sensitiveDataRequests && categories.extremeUrgency) {
+    score += 35;
   }
 
   const safeKeywords = ['never share', 'official website', 'visit bank branch', 'free of charge', 'customer care', 'stay cyber safe', 'official sanchar saathi'];
